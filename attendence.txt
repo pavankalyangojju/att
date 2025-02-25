@@ -1,0 +1,358 @@
+add_faces.py
+---------------------
+import cv2
+import pickle
+import numpy as np
+import os
+from skimage.metrics import structural_similarity as ssim
+
+# Open the camera
+video = cv2.VideoCapture(0)
+
+if not video.isOpened():
+    print("Error: Could not open camera.")
+    exit()
+
+# Load Haarcascade for face detection
+facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+# Create data directory if not exists
+if not os.path.exists('data'):
+    os.makedirs('data')
+
+faces_data = []
+i = 0
+
+name = input("Enter Your Name: ")
+
+faces_file = 'data/faces_data.pkl'
+names_file = 'data/names.pkl'
+
+# Load existing face data if available
+if os.path.exists(faces_file):
+    with open(faces_file, 'rb') as f:
+        stored_faces = pickle.load(f)
+        stored_faces = stored_faces.reshape(-1, 50, 50, 3)  # Reshape properly
+else:
+    stored_faces = np.empty((0, 50, 50, 3), dtype=np.uint8)  # Empty dataset
+
+def mse(image1, image2):
+    """Mean Squared Error (MSE) between two images"""
+    err = np.sum((image1.astype("float") - image2.astype("float")) ** 2)
+    err /= float(image1.shape[0] * image1.shape[1])
+    return err
+
+def is_duplicate(face):
+    """Check if the captured face already exists in stored_faces."""
+    if stored_faces.shape[0] == 0:
+        return False  # No stored faces yet
+
+    face_gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)  # Convert new face to grayscale
+
+    for stored_face in stored_faces:
+        stored_face_gray = cv2.cvtColor(stored_face, cv2.COLOR_BGR2GRAY)  # Convert stored face to grayscale
+        
+        # Ensure both images are the same size
+        if face_gray.shape != stored_face_gray.shape:
+            continue
+
+        # Calculate MSE and SSIM between new face and stored faces
+        mse_score = mse(face_gray, stored_face_gray)
+        ssim_score = ssim(face_gray, stored_face_gray)
+
+        # If the similarity is high (low MSE, high SSIM), it's a duplicate
+        if mse_score < 200 and ssim_score > 0.8:
+            return True
+
+    return False
+
+while True:
+    ret, frame = video.read()
+    
+    if not ret:
+        print("Error: Could not capture frame.")
+        break
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = facedetect.detectMultiScale(gray, 1.3, 5)
+    duplicate_detected = False
+
+    for (x, y, w, h) in faces:
+        crop_img = frame[y:y+h, x:x+w]
+
+        if crop_img.size == 0:
+            print("Error: Empty face image.")
+            continue
+
+        resized_img = cv2.resize(crop_img, (50, 50))
+
+        if is_duplicate(resized_img):
+            duplicate_detected = True
+            cv2.putText(frame, "Duplicate Face Detected!", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 
+                        0.6, (0, 0, 255), 2)
+        elif len(faces_data) < 100 and i % 10 == 0:
+            faces_data.append(resized_img)
+
+        i += 1
+        cv2.putText(frame, str(len(faces_data)), (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 255), 1)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (50, 50, 255), 1)
+
+    cv2.imshow("Frame", frame)
+    k = cv2.waitKey(1)
+
+    if k == ord('q') or len(faces_data) == 100:
+        break
+
+video.release()
+cv2.destroyAllWindows()
+
+# Convert to NumPy array and reshape dynamically
+faces_data = np.asarray(faces_data)
+faces_data = faces_data.reshape(len(faces_data), 50, 50, 3)  # Store in proper shape
+
+# Save names
+if not os.path.exists(names_file):
+    names = [name] * len(faces_data)
+    with open(names_file, 'wb') as f:
+        pickle.dump(names, f)
+else:
+    with open(names_file, 'rb') as f:
+        names = pickle.load(f)
+    names.extend([name] * len(faces_data))
+    with open(names_file, 'wb') as f:
+        pickle.dump(names, f)
+
+# Save face data only if not duplicate
+if not os.path.exists(faces_file):
+    with open(faces_file, 'wb') as f:
+        pickle.dump(faces_data, f)
+else:
+    with open(faces_file, 'rb') as f:
+        stored_faces = pickle.load(f)
+        stored_faces = stored_faces.reshape(-1, 50, 50, 3)  # Ensure correct shape
+
+    stored_faces = np.vstack((stored_faces, faces_data))  # Use `vstack` for proper concatenation
+    with open(faces_file, 'wb') as f:
+        pickle.dump(stored_faces, f)
+
+
+
+------------------------------------------------------------
+test.py
+-------
+from sklearn.neighbors import KNeighborsClassifier
+import cv2
+import pickle
+import numpy as np
+import os
+import csv
+import time
+from datetime import datetime
+from win32com.client import Dispatch
+
+def speak(text):
+    speaker = Dispatch("SAPI.SpVoice")
+    speaker.Speak(text)
+
+# Load the face recognition model and labels
+video = cv2.VideoCapture(0)
+if not video.isOpened():
+    print("Error: Could not open camera.")
+    exit()
+
+facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+try:
+    with open('data/names.pkl', 'rb') as w:
+        LABELS = pickle.load(w)
+    with open('data/faces_data.pkl', 'rb') as f:
+        FACES = pickle.load(f)
+except (FileNotFoundError, EOFError, pickle.UnpicklingError) as e:
+    print("Error loading face data:", e)
+    exit()
+
+# Ensure FACES is a NumPy array and reshape to 2D
+FACES = np.array(FACES).reshape(FACES.shape[0], -1)
+print('Shape of Faces matrix --> ', FACES.shape)
+
+# Train KNN model
+knn = KNeighborsClassifier(n_neighbors=5)
+knn.fit(FACES, LABELS)
+
+# Updated header with three columns: NAME, DATE, TIME
+COL_NAMES = ['NAME', 'DATE', 'TIME']
+
+if not os.path.exists("Attendance"):
+    os.makedirs("Attendance")
+
+# Set to keep track of attendance already marked for this session/day
+attended = set()
+
+while True:
+    ret, frame = video.read()
+    if not ret:
+        print("Error: Frame not captured.")
+        break
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = facedetect.detectMultiScale(gray, 1.3, 5)
+
+    for (x, y, w, h) in faces:
+        if w == 0 or h == 0:
+            continue  # Skip invalid detections
+        
+        crop_img = frame[y:y+h, x:x+w]
+        if crop_img.size == 0:
+            print("Error: Cropped image is empty.")
+            continue  # Skip this iteration
+        
+        # Resize the cropped face and prepare for prediction
+        resized_img = cv2.resize(crop_img, (50, 50)).flatten().reshape(1, -1)
+        
+        try:
+            output = knn.predict(resized_img)
+            recognized_name = output[0]
+            print("Recognized:", recognized_name)
+        except Exception as e:
+            print("Prediction Error:", e)
+            continue
+
+        # Draw bounding boxes and label the face
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 1)
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (50, 50, 255), 2)
+        cv2.rectangle(frame, (x, y-40), (x+w, y), (50, 50, 255), -1)
+        cv2.putText(frame, str(recognized_name), (x, y-15), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 1)
+
+        # Automatically mark attendance if not already marked
+        if recognized_name not in attended:
+            ts = time.time()
+            date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
+            timestamp = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+            attendance_file = f"Attendance/Attendance_{date}.csv"
+            file_exists = os.path.isfile(attendance_file)
+            
+            # If the file exists, check if it's in the old format and update it if necessary
+            if file_exists:
+                with open(attendance_file, "r", newline="") as csvfile:
+                    reader = csv.reader(csvfile)
+                    header = next(reader)
+                if header == ['NAME', 'TIME']:  # old format detected
+                    # Read all existing rows
+                    with open(attendance_file, "r", newline="") as csvfile:
+                        rows = list(csv.reader(csvfile))
+                    # Create new rows with updated header
+                    new_rows = [COL_NAMES]
+                    # Insert the current date for existing records
+                    for row in rows[1:]:
+                        if len(row) == 2:
+                            new_rows.append([row[0], date, row[1]])
+                        else:
+                            new_rows.append(row)
+                    # Write the updated rows back to the file
+                    with open(attendance_file, "w", newline="") as csvfile:
+                        writer = csv.writer(csvfile)
+                        writer.writerows(new_rows)
+            
+            # Append the new attendance record
+            with open(attendance_file, "a", newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                if not file_exists:
+                    writer.writerow(COL_NAMES)
+                writer.writerow([str(recognized_name), date, timestamp])
+            
+            attended.add(recognized_name)
+            speak("Attendance Taken.")
+
+    cv2.imshow("Frame", frame)
+
+    # Press 'q' to quit the program
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+video.release()
+cv2.destroyAllWindows()
+-----------------------------------------------------------------------------------
+app.py
+-------
+import pandas as pd
+import os
+import time
+import streamlit as st
+from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
+
+# Ensure Streamlit maintains execution context
+st.experimental_set_query_params(refresh="true")
+
+# Get current date and timestamp
+ts = time.time()
+date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
+
+# Auto-refresh every 2 seconds
+count = st_autorefresh(interval=2000, key="fizzbuzzcounter")
+
+# Display FizzBuzz Logic
+if count % 3 == 0 and count % 5 == 0:
+    st.write("FizzBuzz")
+elif count % 3 == 0:
+    st.write("Fizz")
+elif count % 5 == 0:
+    st.write("Buzz")
+else:
+    st.write(f"Count: {count}")
+
+# Attendance CSV File Path
+csv_file_path = f"Attendance/Attendance_{date}.csv"
+
+# Display header with current date
+st.header(f"Attendance Record for {date}")
+
+if os.path.exists(csv_file_path):
+    # Check CSV header format
+    with open(csv_file_path, 'r') as f:
+        header_line = f.readline().strip()
+        header_fields = header_line.split(',')
+    
+    expected_columns = ['NAME', 'DATE', 'TIME']
+    
+    # If file is in old format with 2 columns, update it automatically
+    if len(header_fields) == 2 and header_fields == ['NAME', 'TIME']:
+        try:
+            df_old = pd.read_csv(csv_file_path)
+            # Add DATE column with the current date for each row
+            df_old['DATE'] = date
+            # Reorder columns to match the expected format
+            df_new = df_old[['NAME', 'DATE', 'TIME']]
+            df_new.to_csv(csv_file_path, index=False)
+            st.info("CSV file updated to new format (added DATE column).")
+        except Exception as e:
+            st.error(f"Error updating CSV file: {e}")
+    elif len(header_fields) != len(expected_columns):
+        st.error(
+            f"CSV file format error: Expected {len(expected_columns)} columns {expected_columns} "
+            f"but found {len(header_fields)} columns: {header_fields}. "
+            "Please update or delete the file to use the new format."
+        )
+
+    # Try reading the CSV file with retries
+    retry = 3  # Number of retry attempts
+    for attempt in range(retry):
+        try:
+            df = pd.read_csv(csv_file_path)
+            # Search Filter Input
+            search_query = st.text_input("Search Attendance Record:", "")
+            # Filter DataFrame based on search query
+            if search_query:
+                filtered_df = df[df.apply(lambda row: row.astype(str).str.contains(search_query, case=False, na=False).any(), axis=1)]
+            else:
+                filtered_df = df
+            # Display DataFrame with highlighted max values
+            st.dataframe(filtered_df.style.highlight_max(axis=0))
+            break  # Successfully read and displayed the file
+        except Exception as e:
+            if attempt < retry - 1:
+                time.sleep(1)  # Wait and retry
+            else:
+                st.error(f"Error reading the CSV file: {e}")
+else:
+    st.warning(f"No attendance record found for {date}.")
