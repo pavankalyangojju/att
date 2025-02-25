@@ -493,7 +493,7 @@ while True:
 video.release()
 cv2.destroyAllWindows()
 -----------------------------------------------------------------------------------
-LCD added
+buzzer added
 ---------
 from sklearn.neighbors import KNeighborsClassifier
 import cv2
@@ -504,8 +504,13 @@ import csv
 import time
 from datetime import datetime
 import pyttsx3
-from RPLCD import CharLCD
 import RPi.GPIO as GPIO
+
+# Initialize GPIO for buzzer
+GPIO.setmode(GPIO.BCM)
+BUZZER_PIN = 17  # Change as needed for your wiring
+GPIO.setup(BUZZER_PIN, GPIO.OUT)
+GPIO.output(BUZZER_PIN, GPIO.LOW)
 
 # Initialize pyttsx3 engine for text-to-speech
 engine = pyttsx3.init()
@@ -513,12 +518,6 @@ engine = pyttsx3.init()
 def speak(text):
     engine.say(text)
     engine.runAndWait()
-
-# Initialize parallel (GPIO) LCD
-# Adjust these pin numbers to match your wiring
-lcd = CharLCD(pin_rs=7, pin_e=8, pins_data=[25, 24, 23, 18],
-              numbering_mode=GPIO.BCM,
-              cols=16, rows=2, dotsize=8)
 
 # Load the face recognition model and labels
 video = cv2.VideoCapture(0)
@@ -630,11 +629,12 @@ while True:
             attended.add(recognized_name)
             speak("Attendance Taken.")
 
-            # Display message on LCD
-            lcd.clear()
-            lcd.write_string("Attendance Taken")
-            time.sleep(2)
-            lcd.clear()
+            # Buzz the buzzer two times (each beep lasting 1 second)
+            for _ in range(2):
+                GPIO.output(BUZZER_PIN, GPIO.HIGH)
+                time.sleep(1)
+                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                time.sleep(0.5)
 
     cv2.imshow("Frame", frame)
 
@@ -644,4 +644,4 @@ while True:
 
 video.release()
 cv2.destroyAllWindows()
-
+GPIO.cleanup()
