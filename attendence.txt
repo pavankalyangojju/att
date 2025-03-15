@@ -1337,7 +1337,12 @@ while True:
             print("RFID Error:", e)
             continue
 
-        if recognized_name not in attended and str(card_id) in RFID_LIST:
+        # Debug: Print stored RFID list and scanned RFID
+        print(f"Stored RFID List: {RFID_LIST}")
+        print(f"Scanned RFID: {card_id}")
+
+        # Fix: Ensure proper matching
+        if recognized_name not in attended and str(card_id).strip() in [str(rfid).strip() for rfid in RFID_LIST]:
             ts = time.time()
             date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
             timestamp = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
@@ -1368,4 +1373,3 @@ while True:
 video.release()
 cv2.destroyAllWindows()
 GPIO.cleanup()
-
