@@ -818,359 +818,177 @@ video.release()
 cv2.destroyAllWindows()
 GPIO.cleanup()
 ---------------------------------------------------------------------------------------------------------------------------
-from sklearn.neighbors import KNeighborsClassifier
+#! /usr/bin/env python
 
 import cv2
-
 import pickle
-
 import numpy as np
-
 import os
-
 import csv
-
 import time
-
 from datetime import datetime
-
 import pyttsx3
-
 import RPi.GPIO as GPIO
-
 import requests  # For sending data to an API
-
 import smbus2  # For I2C LCD display
+import drivers  # LCD Driver Library
+from time import sleep
 
-
-
-# I2C LCD Configuration
-
-I2C_ADDR = 0x27  # Change if necessary (Use `0x3F` if `0x27` doesnâ€™t work)
-
+# ✅ I2C LCD Configuration
+I2C_ADDR = 0x27  # Change to 0x3F if needed
 bus = smbus2.SMBus(1)
+display = drivers.Lcd()  # Load LCD driver
 
-
-
-# LCD Functions
-
-def lcd_send_command(cmd):
-
-    bus.write_byte_data(I2C_ADDR, 0x00, cmd)
-
-    time.sleep(0.01)
-
-
-
-def lcd_send_data(data):
-
-    bus.write_byte_data(I2C_ADDR, 0x40, data)
-
-    time.sleep(0.01)
-
-
-
+# ✅ LCD Functions
 def lcd_clear():
+    """Clear LCD Display"""
+    display.lcd_clear()
 
-    lcd_send_command(0x01)  # Clear display
+def lcd_print(message, line=1):
+    """Print text on LCD"""
+    message = message[:16]  # Ensure message is 16 characters max
+    display.lcd_display_string(message, line)
 
-    time.sleep(0.1)
-
-
-
-def lcd_init():
-
-    lcd_send_command(0x33)  # Initialize
-
-    lcd_send_command(0x32)  # Set to 4-bit mode
-
-    lcd_send_command(0x28)  # 2-line, 5x7 matrix
-
-    lcd_send_command(0x0C)  # Display ON, Cursor OFF
-
-    lcd_send_command(0x06)  # Auto-increment cursor
-
-    lcd_send_command(0x01)  # Clear display
-
-
-
-def lcd_print(message, line=0):
-
-    if line == 0:
-
-        lcd_send_command(0x80)  # Move cursor to first line
-
-    else:
-
-        lcd_send_command(0xC0)  # Move cursor to second line
-
-    
-
-    for char in message.ljust(16):  # Ensure 16 characters per line
-
-        lcd_send_data(ord(char))
-
-
-
-# Initialize LCD
-
-lcd_init()
-
+# ✅ Initialize LCD
 lcd_clear()
+lcd_print("Attendance System", 1)
+lcd_print("Initializing...", 2)
+sleep(2)
 
-
-
-# Print a startup message
-
-lcd_print("Attendance System", 0)
-
-lcd_print("Initializing...", 1)
-
-
-
-# Initialize GPIO for buzzer
-
+# ✅ Initialize GPIO for buzzer
 GPIO.setmode(GPIO.BCM)
-
-BUZZER_PIN = 17  # Change as needed for your wiring
-
+BUZZER_PIN = 17  
 GPIO.setup(BUZZER_PIN, GPIO.OUT)
-
 GPIO.output(BUZZER_PIN, GPIO.LOW)
 
-
-
-# Initialize pyttsx3 engine for text-to-speech
-
+# ✅ Initialize pyttsx3 for text-to-speech
 engine = pyttsx3.init()
 
-
-
 def speak(text):
-
+    """Convert text to speech"""
     engine.say(text)
-
     engine.runAndWait()
 
-
-
 def send_attendance_api(name, date, timestamp):
-
+    """Send attendance data to API"""
     api_url = "http://localhost:5000/attendance"  
-
-    payload = {
-
-        "name": name,
-
-        "date": date,
-
-        "time": timestamp
-
-    }
-
+    payload = {"name": name, "date": date, "time": timestamp}
     try:
-
         response = requests.post(api_url, json=payload)
-
         if response.status_code == 200:
-
             print("Attendance data successfully sent to API.")
-
         else:
-
             print("Failed to send attendance data. Status code:", response.status_code)
-
     except Exception as e:
-
         print("Error sending attendance data to API:", e)
 
-
-
-# Load face recognition model
-
+# ✅ Load Face Recognition Model
 video = cv2.VideoCapture(0)
-
 if not video.isOpened():
-
     print("Error: Could not open camera.")
-
     exit()
-
-
 
 facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-
-
 try:
-
     with open('data/names.pkl', 'rb') as w:
-
         LABELS = pickle.load(w)
-
     with open('data/faces_data.pkl', 'rb') as f:
-
         FACES = pickle.load(f)
-
 except (FileNotFoundError, EOFError, pickle.UnpicklingError) as e:
-
     print("Error loading face data:", e)
-
     exit()
 
-
-
 FACES = np.array(FACES).reshape(FACES.shape[0], -1)
-
-print('Shape of Faces matrix --> ', FACES.shape)
-
-
-
-# Train KNN model
-
 knn = KNeighborsClassifier(n_neighbors=5)
-
 knn.fit(FACES, LABELS)
 
-
-
 COL_NAMES = ['NAME', 'DATE', 'TIME']
-
-
-
 if not os.path.exists("Attendance"):
-
     os.makedirs("Attendance")
-
-
 
 attended = set()
 
+# ✅ Face Recognition Loop
+try:
+    while True:
+        ret, frame = video.read()
+        if not ret:
+            print("Error: Frame not captured.")
+            break
 
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = facedetect.detectMultiScale(gray, 1.3, 5)
 
-while True:
-
-    ret, frame = video.read()
-
-    if not ret:
-
-        print("Error: Frame not captured.")
-
-        break
-
-
-
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    faces = facedetect.detectMultiScale(gray, 1.3, 5)
-
-
-
-    for (x, y, w, h) in faces:
-
-        if w == 0 or h == 0:
-
-            continue  # Skip invalid detections
-
-
-
-        crop_img = frame[y:y+h, x:x+w]
-
-        if crop_img.size == 0:
-
-            print("Error: Cropped image is empty.")
-
-            continue
-
-
-
-        try:
-
-            resized_img = cv2.resize(crop_img, (50, 50)).flatten().reshape(1, -1)
-
-        except Exception as e:
-
-            print("Error resizing image:", e)
-
-            continue
-
-
-
-        try:
-
-            output = knn.predict(resized_img)
-
-            recognized_name = output[0]
-
-            print("Recognized:", recognized_name)
-
-        except Exception as e:
-
-            print("Prediction Error:", e)
-
-            continue
-
-
-
-        if recognized_name not in attended:
-
-            ts = time.time()
-
-            date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
-
-            timestamp = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
-
-
-
-            attended.add(recognized_name)
-
-            speak("Attendance Taken.")
-
-
-
-            # Send attendance data to API
-
-            send_attendance_api(str(recognized_name), date, timestamp)
-
-
-
-            # Display on LCD
-
+        if len(faces) == 0:
+            # No face detected - show LCD demo text
+            lcd_print("Greetings Human!", 1)
+            lcd_print("Demo Pi Guy code", 2)
+            sleep(2)
+            lcd_print("I am a display!", 1)
+            sleep(2)
             lcd_clear()
+            sleep(2)
+            continue
 
-            lcd_print(f"Name: {recognized_name}", 0)
+        for (x, y, w, h) in faces:
+            if w == 0 or h == 0:
+                continue  # Skip invalid detections
 
-            lcd_print("Attendance Taken", 1)
+            crop_img = frame[y:y+h, x:x+w]
 
+            if crop_img.size == 0:
+                print("Error: Cropped image is empty.")
+                continue
 
+            try:
+                resized_img = cv2.resize(crop_img, (50, 50)).flatten().reshape(1, -1)
+            except Exception as e:
+                print("Error resizing image:", e)
+                continue
 
-            # Buzz the buzzer two times
+            try:
+                output = knn.predict(resized_img)
+                recognized_name = output[0]
+                print("Recognized:", recognized_name)
+            except Exception as e:
+                print("Prediction Error:", e)
+                continue
 
-            for _ in range(2):
+            if recognized_name not in attended:
+                ts = time.time()
+                date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
+                timestamp = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
 
-                GPIO.output(BUZZER_PIN, GPIO.HIGH)
+                attended.add(recognized_name)
+                speak("Attendance Taken.")
 
-                time.sleep(1)
+                # ✅ Send Attendance Data to API
+                send_attendance_api(str(recognized_name), date, timestamp)
 
-                GPIO.output(BUZZER_PIN, GPIO.LOW)
+                # ✅ Display Attendance Info on LCD
+                lcd_clear()
+                lcd_print(f"Name: {recognized_name[:16]}", 1)  # Trims long names
+                lcd_print("Attendance Taken", 2)
+                sleep(2)
 
-                time.sleep(0.5)
+                # ✅ Buzzer Alert (2 Beeps)
+                for _ in range(2):
+                    GPIO.output(BUZZER_PIN, GPIO.HIGH)
+                    sleep(1)
+                    GPIO.output(BUZZER_PIN, GPIO.LOW)
+                    sleep(0.5)
 
+        cv2.imshow("Frame", frame)
 
+        # Press 'q' to quit
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-    cv2.imshow("Frame", frame)
-
-
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-
-        break
-
-
+except KeyboardInterrupt:
+    print("Cleaning up!")
+    lcd_clear()
 
 video.release()
-
 cv2.destroyAllWindows()
-
 GPIO.cleanup()
-
