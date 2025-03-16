@@ -12,13 +12,19 @@ from RPLCD.i2c import CharLCD
 lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1,
               cols=16, rows=2, dotsize=8)
 
-# ✅ Display Welcome Message
-lcd.clear()
-lcd.write_string("HI, Welcome to")
-lcd.crlf()
-lcd.write_string("Attendance System")
-time.sleep(3)
-lcd.clear()
+# ✅ Function to Display Messages
+def show_message(line1, line2="", duration=3):
+    """Clears LCD and displays messages for a specific duration"""
+    lcd.clear()
+    lcd.write_string(line1)
+    if line2:
+        lcd.crlf()
+        lcd.write_string(line2)
+    time.sleep(duration)
+    lcd.clear()
+
+# ✅ Display Welcome Message Initially
+show_message("HI Welcome to", "Attendance System", 2)
 
 # ✅ Setup GPIO
 GPIO.setwarnings(False)
@@ -36,7 +42,7 @@ GPIO.output(LED_PIN, GPIO.LOW)
 # Open the camera
 video = cv2.VideoCapture(0)
 if not video.isOpened():
-    lcd.write_string("Camera Error!")
+    show_message("Camera Error!")
     print("Error: Could not open camera.")
     exit()
 
@@ -52,25 +58,20 @@ rfid_data = []
 i = 0
 
 # ✅ Display Scan Card Message
-lcd.write_string("Scan your CARD")
+show_message("Scan your CARD")
 print("Scan your RFID card...")
 try:
     card_id, card_text = reader.read()
     print(f"RFID Card ID: {card_id}")
-    lcd.clear()
-    lcd.write_string("Enter Your Name:")
+    show_message("Enter Your Name:")
     name = input("Enter Your Name: ")
 except Exception as e:
-    lcd.clear()
-    lcd.write_string("RFID Error!")
+    show_message("RFID Error!")
     print(f"RFID Error: {e}")
     exit()
 
 # ✅ Display Face Capture Message
-lcd.clear()
-lcd.write_string("Look at Camera")
-lcd.crlf()
-lcd.write_string("Capturing Face")
+show_message("Put your face", "towards camera")
 print("Put your face towards camera...")
 
 # ✅ LED ON while capturing face
@@ -111,8 +112,7 @@ cv2.destroyAllWindows()
 GPIO.output(LED_PIN, GPIO.LOW)
 
 # ✅ Display Data Saving Message
-lcd.clear()
-lcd.write_string("Saving Data...")
+show_message("Saving Data...")
 print("Saving data...")
 
 # Save face data
@@ -158,11 +158,12 @@ else:
         pickle.dump(stored_faces, f)
 
 # ✅ Final Message: Data Saved
-lcd.clear()
-lcd.write_string("Data Saved")
-lcd.crlf()
-lcd.write_string("Successfully!")
+show_message("Data Saved", "Successfully!", 3)
 print("Data saved successfully!")
+
+# ✅ **Loop Welcome Message Until Stopped**
+while True:
+    show_message("HI Welcome to", "Attendance System", 5)
 
 # Cleanup
 GPIO.cleanup()
