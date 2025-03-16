@@ -8,23 +8,16 @@ from skimage.metrics import structural_similarity as ssim
 import time
 from RPLCD.i2c import CharLCD
 
-# ✅ Initialize LCD (I2C Address: 0x27 or 0x3F)
-lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1,
-              cols=16, rows=2, dotsize=8)
+# ✅ Initialize LCD (I2C Address may be 0x27 or 0x3F, check using `i2cdetect -y 1`)
+lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1, cols=16, rows=2, dotsize=8)
 
-# ✅ Function to Display Messages
-def show_message(line1, line2="", duration=3):
-    """Clears LCD and displays messages for a specific duration"""
-    lcd.clear()
-    lcd.write_string(line1)
-    if line2:
-        lcd.crlf()
-        lcd.write_string(line2)
-    time.sleep(duration)
-    lcd.clear()
-
-# ✅ Display Welcome Message **ONLY ONCE**
-show_message("HI Welcome to", "Attendance System", 3)
+# ✅ Display Welcome Message
+lcd.clear()
+lcd.write_string("HI, Welcome to")
+lcd.crlf()
+lcd.write_string("AttendanceSystem")
+time.sleep(3)
+lcd.clear()
 
 # ✅ Setup GPIO
 GPIO.setwarnings(False)
@@ -42,7 +35,7 @@ GPIO.output(LED_PIN, GPIO.LOW)
 # Open the camera
 video = cv2.VideoCapture(0)
 if not video.isOpened():
-    show_message("Camera Error!")
+    lcd.write_string("Camera Error!")
     print("Error: Could not open camera.")
     exit()
 
@@ -58,30 +51,31 @@ rfid_data = []
 i = 0
 
 # ✅ Display Scan Card Message
-show_message("Scan your CARD")
+lcd.write_string("Scan your CARD")
 print("Scan your RFID card...")
 try:
     card_id, card_text = reader.read()
     print(f"RFID Card ID: {card_id}")
-    show_message("Enter Your Name:")
+    lcd.clear()
+    lcd.write_string("Enter Your Name:")
     name = input("Enter Your Name: ")
 except Exception as e:
-    show_message("RFID Error!")
+    lcd.clear()
+    lcd.write_string("RFID Error!")
     print(f"RFID Error: {e}")
     exit()
 
-# ✅ Display Face Capture Message with Progress
+# ✅ Display Face Capture Message with Stay Instruction
 lcd.clear()
-lcd.write_string("Capturing Face")
+lcd.write_string("Look at Camera")
 lcd.crlf()
-lcd.write_string("Progress: 0%")
-print("Put your face towards camera...")
+lcd.write_string("Stay until Light OFF")
+print("Put your face towards the camera and stay until the light turns off...")
 
 # ✅ LED ON while capturing face
 GPIO.output(LED_PIN, GPIO.HIGH)
 
-# Face capture loop with real-time LCD progress update
-for progress in range(101):  # Loop from 0 to 100
+while True:
     ret, frame = video.read()
     
     if not ret:
@@ -100,21 +94,14 @@ for progress in range(101):  # Loop from 0 to 100
             rfid_data.append(card_id)
 
         i += 1
-        cv2.putText(frame, f"{progress}%", (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 255), 1)
+        cv2.putText(frame, str(len(faces_data)), (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 255), 1)
         cv2.rectangle(frame, (x, y), (x + w, y + h), (50, 50, 255), 1)
 
     cv2.imshow("Frame", frame)
+    k = cv2.waitKey(1)
 
-    # ✅ Update LCD with current progress
-    lcd.clear()
-    lcd.write_string("Capturing Face")
-    lcd.crlf()
-    lcd.write_string(f"Progress: {progress}%")
-    
-    time.sleep(1)  # Wait for 1 second before updating progress
-
-    if progress == 100 or len(faces_data) == 100:
-        break  # Exit loop when progress reaches 100%
+    if k == ord('q') or len(faces_data) == 100:
+        break
 
 video.release()
 cv2.destroyAllWindows()
@@ -123,7 +110,8 @@ cv2.destroyAllWindows()
 GPIO.output(LED_PIN, GPIO.LOW)
 
 # ✅ Display Data Saving Message
-show_message("Saving Data...")
+lcd.clear()
+lcd.write_string("Saving Data...")
 print("Saving data...")
 
 # Save face data
@@ -169,11 +157,11 @@ else:
         pickle.dump(stored_faces, f)
 
 # ✅ Final Message: Data Saved
-show_message("Data Saved", "Successfully!", 3)
+lcd.clear()
+lcd.write_string("Data Saved")
+lcd.crlf()
+lcd.write_string("Successfully!")
 print("Data saved successfully!")
-
-# ✅ **LCD will now remain blank instead of showing "HI Welcome to Attendance System" again**
-lcd.clear()  # Make LCD blank
 
 # Cleanup
 GPIO.cleanup()
