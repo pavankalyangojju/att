@@ -48,7 +48,7 @@ try:
     with open(rfid_file, 'rb') as r:
         RFID_LIST = pickle.load(r)
 except FileNotFoundError:
-    print("Warning: No previous data found. Starting fresh.")
+    print("No previous data found. Starting fresh.")
     LABELS = []
     FACES = np.empty((0, 50, 50, 3), dtype=np.uint8)
     RFID_LIST = []
@@ -56,18 +56,21 @@ except FileNotFoundError:
 # Ensure `LABELS` has the same length as `FACES`
 if len(LABELS) != len(FACES):
     print(f"Warning: Mismatch in data size. Faces: {len(FACES)}, Labels: {len(LABELS)}")
-    LABELS = LABELS[:len(FACES)]  # Trim to match FACES length
+    if len(LABELS) < len(FACES):
+        LABELS.extend(["Unknown"] * (len(FACES) - len(LABELS)))  # Fill missing labels
+    else:
+        LABELS = LABELS[:len(FACES)]  # Trim to match FACES length
 
 # Convert `FACES` into a valid shape for KNN
 if len(FACES) > 0:
     FACES = FACES.reshape(FACES.shape[0], -1)  
 
 # Train KNN only if data is available
-if len(FACES) > 0:
+if len(FACES) > 0 and len(LABELS) > 0:
     knn = KNeighborsClassifier(n_neighbors=5)
     knn.fit(FACES, LABELS)
 else:
-    print("Warning: No face data available. Cannot train KNN.")
+    print("No face data available. Cannot train KNN.")
     knn = None
 
 attended = set()
