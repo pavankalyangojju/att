@@ -1761,26 +1761,26 @@ import requests
 from mfrc522 import SimpleMFRC522
 from sklearn.neighbors import KNeighborsClassifier
 
-# ✅ Disable GPIO warnings
+# Disable GPIO warnings
 GPIO.setwarnings(False)
 
-# ✅ GPIO Setup for Buzzer
+# GPIO Setup for Buzzer
 GPIO.setmode(GPIO.BCM)
 BUZZER_PIN = 17
 GPIO.setup(BUZZER_PIN, GPIO.OUT)
 GPIO.output(BUZZER_PIN, GPIO.LOW)
 
-# ✅ Initialize pyttsx3 engine for text-to-speech
+# Initialize pyttsx3 engine for text-to-speech
 engine = pyttsx3.init()
 
-# ✅ Initialize RFID Reader
+# Initialize RFID Reader
 reader = SimpleMFRC522()
 
-# ✅ Ensure `Attendance` folder exists
+# Ensure Attendance folder exists
 if not os.path.exists("Attendance"):
     os.makedirs("Attendance")
 
-# ✅ Load Face Recognition Model
+# Load Face Recognition Model
 try:
     with open('data/names.pkl', 'rb') as w:
         LABELS = pickle.load(w)
@@ -1792,50 +1792,51 @@ except (FileNotFoundError, EOFError, pickle.UnpicklingError) as e:
     print("Error loading face data:", e)
     exit()
 
-# ✅ Ensure LABELS has the same length as FACES
+# Ensure LABELS has the same length as FACES
 if len(LABELS) != len(FACES):
-    print(f"⚠️ Error: Mismatch - Faces ({len(FACES)}) and Labels ({len(LABELS)})")
+    print(f"Error: Mismatch - Faces ({len(FACES)}) and Labels ({len(LABELS)})")
+    print("Solution: Delete 'names.pkl' and re-run data collection.")
     exit()
 
-# ✅ Reshape FACES for training
+# Reshape FACES for training
 FACES = np.array(FACES).reshape(FACES.shape[0], -1)
 LABELS = np.array(LABELS)
-print(f"✅ Faces shape: {FACES.shape}, Labels shape: {LABELS.shape}")
+print(f"Faces shape: {FACES.shape}, Labels shape: {LABELS.shape}")
 
-# ✅ Train KNN Model
+# Train KNN Model
 knn = KNeighborsClassifier(n_neighbors=5)
 knn.fit(FACES, LABELS)
 
-# ✅ Face Detection Setup
+# Face Detection Setup
 video = cv2.VideoCapture(0)
 if not video.isOpened():
-    print("⚠️ Error: Camera not found.")
+    print("Error: Camera not found.")
     exit()
 
 facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-# ✅ Set of attended people to prevent duplicates
+# Set of attended people to prevent duplicates
 attended = set()
 
 def buzzer_and_lcd_message(name):
-    """Activates buzzer & displays message on LCD"""
+    """Activates buzzer & displays message"""
     for _ in range(2):
         GPIO.output(BUZZER_PIN, GPIO.HIGH)
         time.sleep(1)
         GPIO.output(BUZZER_PIN, GPIO.LOW)
         time.sleep(0.5)
 
-    print(f"✅ Attendance Taken: {name}")
+    print(f"Attendance Taken: {name}")
     time.sleep(3)
 
 def detect_fake_face(frame):
     """Detects if a face is from a photo (Fake Face Detection)"""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     laplacian = cv2.Laplacian(gray, cv2.CV_64F).var()
-    print(f"🔎 Laplacian Value: {laplacian}")
+    print(f"Laplacian Value: {laplacian}")
 
     if laplacian < 50:  # Low variance indicates a fake face
-        print("⚠️ Fake face detected! Use a real face.")
+        print("Fake face detected! Use a real face.")
         GPIO.output(BUZZER_PIN, GPIO.HIGH)
         time.sleep(1)
         GPIO.output(BUZZER_PIN, GPIO.LOW)
@@ -1844,11 +1845,11 @@ def detect_fake_face(frame):
     return False
 
 while True:
-    print("📸 Put Your Face in Front of the Camera")
+    print("Put Your Face in Front of the Camera")
 
     ret, frame = video.read()
     if not ret:
-        print("⚠️ Error: Frame not captured.")
+        print("Error: Frame not captured.")
         break
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -1863,26 +1864,26 @@ while True:
         try:
             resized_img = cv2.resize(crop_img, (50, 50)).flatten().reshape(1, -1)
         except Exception as e:
-            print(f"⚠️ Error resizing image: {e}")
+            print(f"Error resizing image: {e}")
             continue
 
         try:
             output = knn.predict(resized_img)
             recognized_name = output[0]
-            print(f"✅ Recognized: {recognized_name}")
+            print(f"Recognized: {recognized_name}")
         except Exception as e:
-            print(f"⚠️ Prediction Error: {e}")
+            print(f"Prediction Error: {e}")
             continue
 
-        print("🔄 Scan Your RFID Card")
+        print("Scan Your RFID Card")
         engine.say("Please scan your RFID card")
         engine.runAndWait()
 
         try:
             card_id, _ = reader.read()
-            print(f"📟 RFID Card Detected: {card_id}")
+            print(f"RFID Card Detected: {card_id}")
         except Exception as e:
-            print(f"⚠️ RFID Error: {e}")
+            print(f"RFID Error: {e}")
             continue
 
         if recognized_name not in attended and str(card_id).strip() in [str(rfid).strip() for rfid in RFID_LIST]:
@@ -1891,7 +1892,7 @@ while True:
             timestamp = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
             attendance_file = f"Attendance/Attendance_{date}.csv"
 
-            # ✅ Save Attendance
+            # Save Attendance
             file_exists = os.path.isfile(attendance_file)
             with open(attendance_file, "a", newline='') as csvfile:
                 writer = csv.writer(csvfile)
@@ -1900,7 +1901,7 @@ while True:
                 writer.writerow([recognized_name, card_id, date, timestamp])
 
             attended.add(recognized_name)
-            print(f"✅ Attendance Recorded: {recognized_name}")
+            print(f"Attendance Recorded: {recognized_name}")
             engine.say("Attendance Taken")
             engine.runAndWait()
             buzzer_and_lcd_message(recognized_name)
