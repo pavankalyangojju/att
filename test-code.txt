@@ -114,6 +114,8 @@ if not os.path.exists("Attendance"):
     os.makedirs("Attendance")
 
 attended = set()
+camera_off_time = None  # Track when the camera was turned off
+camera_active = True  # Camera state
 
 def buzzer_and_lcd_message(name):
     for _ in range(2):
@@ -129,8 +131,22 @@ def buzzer_and_lcd_message(name):
     lcd_display("", LINE_2)
 
 while True:
+    if not camera_active:
+        # Check if 10 seconds have passed
+        if time.time() - camera_off_time >= 10:
+            video = cv2.VideoCapture(0)
+            if video.isOpened():
+                print("Camera turned back on.")
+                camera_active = True
+            else:
+                print("Error: Could not reopen camera.")
+
     lcd_display("Put Face in Front", LINE_1)
     lcd_display("of Camera", LINE_2)
+
+    if not camera_active:
+        time.sleep(1)
+        continue  # Skip iteration if camera is off
 
     ret, frame = video.read()
     if not ret:
@@ -173,9 +189,6 @@ while True:
             print("RFID Error:", e)
             continue
 
-        print(f"Stored RFID List: {RFID_LIST}")
-        print(f"Scanned RFID: {card_id}")
-
         if recognized_name not in attended and str(card_id).strip() in [str(rfid).strip() for rfid in RFID_LIST]:
             ts = time.time()
             date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
@@ -195,17 +208,18 @@ while True:
             speak("Attendance Taken")
             send_attendance_api(recognized_name, date, timestamp)
             buzzer_and_lcd_message(recognized_name)
-        else:
-            lcd_display("Unauthorized Access", LINE_1)
-            lcd_display("Try Again", LINE_2)
-            time.sleep(2)
+
+            # Turn off the camera after attendance is taken
+            video.release()
+            camera_active = False
+            camera_off_time = time.time()
+            print("Camera turned off for 10 seconds.")
 
     cv2.imshow("Frame", frame)
 
-    # Exit condition: If 'q' is pressed, clear LCD and exit
     if cv2.waitKey(1) & 0xFF == ord('q'):
-        lcd_display("", LINE_1)  # Clear LCD Line 1
-        lcd_display("", LINE_2)  # Clear LCD Line 2
+        lcd_display("", LINE_1)
+        lcd_display("", LINE_2)
         break
 
 video.release()
