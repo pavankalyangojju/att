@@ -7,12 +7,18 @@ from mfrc522 import SimpleMFRC522
 from skimage.metrics import structural_similarity as ssim
 import time
 
+# ✅ Fix: Disable GPIO Warnings
+GPIO.setwarnings(False)
+
+# ✅ Fix: Check if GPIO mode is already set
+if GPIO.getmode() is None:
+    GPIO.setmode(GPIO.BCM)
+
 # Initialize RFID Reader
 reader = SimpleMFRC522()
 
 # Set up GPIO for LED
 LED_PIN = 18  # Change this to the correct GPIO pin for your LED
-GPIO.setmode(GPIO.BCM)
 GPIO.setup(LED_PIN, GPIO.OUT)
 GPIO.output(LED_PIN, GPIO.LOW)  # Start with LED OFF
 
@@ -91,7 +97,7 @@ def is_duplicate(face):
 
     return False
 
-# Turn on LED when adding faces
+# ✅ Turn on LED when adding faces
 GPIO.output(LED_PIN, GPIO.HIGH)
 print("LED ON: Capturing face data...")
 
@@ -136,7 +142,7 @@ while True:
 video.release()
 cv2.destroyAllWindows()
 
-# Turn off LED after capturing face data
+# ✅ Turn off LED after capturing face data
 GPIO.output(LED_PIN, GPIO.LOW)
 print("LED OFF: Face capture completed.")
 
@@ -182,5 +188,5 @@ else:
 
 print("Face and RFID data saved successfully!")
 
-# Cleanup GPIO
+# ✅ Cleanup GPIO
 GPIO.cleanup()
