@@ -2,50 +2,82 @@ import cv2
 import pickle
 import numpy as np
 import os
-import RPi.GPIO as GPIO
-from mfrc522 import SimpleMFRC522
-from skimage.metrics import structural_similarity as ssim
+import csv
 import time
-import I2C_LCD_driver  
+from datetime import datetime
+import pyttsx3
+import RPi.GPIO as GPIO
+import smbus2  
+import requests  
+from mfrc522 import SimpleMFRC522  
+from sklearn.neighbors import KNeighborsClassifier
+from skimage.metrics import structural_similarity as ssim  
+
+# GPIO Setup
+GPIO.setmode(GPIO.BCM)
+BUZZER_PIN = 17  
+GPIO.setup(BUZZER_PIN, GPIO.OUT)
+GPIO.output(BUZZER_PIN, GPIO.LOW)
+
+# Initialize pyttsx3 engine for text-to-speech
+engine = pyttsx3.init()
 
 # Initialize RFID Reader
 reader = SimpleMFRC522()
 
+# LCD I2C Setup
+LCD_ADDRESS = 0x27  
+bus = smbus2.SMBus(1)  
+
+# LCD Functions
+def lcd_byte(bits, mode):
+    bus.write_byte(LCD_ADDRESS, mode | (bits & 0xF0) | 0x08)
+    bus.write_byte(LCD_ADDRESS, mode | ((bits << 4) & 0xF0) | 0x08)
+
+def lcd_display(message, line):
+    lcd_byte(line, 0)
+    for char in message.ljust(16, " "):
+        lcd_byte(ord(char), 1)
+
 # Initialize LCD
-lcd = I2C_LCD_driver.lcd()
-lcd.lcd_clear()
-lcd.lcd_display_string("Initializing...", 1)
+lcd_display("Initializing...", 0x80)
 time.sleep(2)
 
-# Open Camera
-video = cv2.VideoCapture(0)
-if not video.isOpened():
-    print("Error: Could not open camera.")
-    lcd.lcd_display_string("Camera Error!", 1)
-    exit()
+def speak(text):
+    engine.say(text)
+    engine.runAndWait()
 
-# Load Haarcascade for face detection
-cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-eye_cascade_path = cv2.data.haarcascades + 'haarcascade_eye.xml'
+# Ensure Data Directory Exists
+if not os.path.exists("data"):
+    os.makedirs("data")
 
-if not os.path.exists(cascade_path) or not os.path.exists(eye_cascade_path):
-    print("Error: Haarcascade file missing.")
-    lcd.lcd_display_string("Haarcascade Missing!", 1)
-    exit()
+# File paths
+faces_file = 'data/faces_data.pkl'
+names_file = 'data/names.pkl'
+rfid_file = 'data/rfid_data.pkl'
 
-facedetect = cv2.CascadeClassifier(cascade_path)
-eye_detect = cv2.CascadeClassifier(eye_cascade_path)
+# Load Existing Data
+if os.path.exists(faces_file):
+    with open(faces_file, 'rb') as f:
+        stored_faces = pickle.load(f).reshape(-1, 50, 50, 3)
+else:
+    stored_faces = np.empty((0, 50, 50, 3), dtype=np.uint8)
 
-faces_data = []
-rfid_data = []
-previous_frame = None
-fake_face_count = 0
-frame_counter = 0
-motion_detected = False
+if os.path.exists(rfid_file):
+    with open(rfid_file, 'rb') as f:
+        stored_rfid = pickle.load(f)
+else:
+    stored_rfid = []
+
+if os.path.exists(names_file):
+    with open(names_file, 'rb') as f:
+        stored_names = pickle.load(f)
+else:
+    stored_names = []
 
 # Read RFID Card
 print("Scan your RFID card...")
-lcd.lcd_display_string("Scan RFID Card...", 1)
+lcd_display("Scan RFID Card...", 0x80)
 
 try:
     card_id, card_text = reader.read()
@@ -53,94 +85,137 @@ try:
     name = input("Enter Your Name: ")
 except Exception as e:
     print(f"RFID Error: {e}")
-    lcd.lcd_display_string("RFID Read Error!", 1)
+    lcd_display("RFID Error!", 0x80)
     exit()
 
-# Fake Face Detection
-def detect_fake_face(frame, gray, face_coords):
-    global previous_frame, fake_face_count, frame_counter, motion_detected
+# Open Camera
+video = cv2.VideoCapture(0)
+if not video.isOpened():
+    print("Error: Could not open camera.")
+    lcd_display("Camera Error!", 0x80)
+    exit()
 
-    x, y, w, h = face_coords
-    face_region = gray[y:y+h, x:x+w]
+# Load Haarcascade for face detection
+facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-    # Step 1: Eye detection (real people blink)
-    eyes = eye_detect.detectMultiScale(face_region, 1.1, 4)
-    if len(eyes) == 0:
-        fake_face_count += 1  # No eyes detected (could be fake)
-    else:
-        fake_face_count = 0  # Eyes detected, reset counter
+faces_data = []
+rfid_data = []
+attended = set()
+previous_frame = None  
+fake_face_count = 0  
 
-    # Step 2: Compare with previous frame (motion detection)
-    if previous_frame is not None:
-        gray_prev = cv2.cvtColor(previous_frame, cv2.COLOR_BGR2GRAY)
-        gray_curr = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+def mse(image1, image2):
+    """Mean Squared Error (MSE) between two images"""
+    err = np.sum((image1.astype("float") - image2.astype("float")) ** 2)
+    err /= float(image1.shape[0] * image1.shape[1])
+    return err
 
-        ssim_score = ssim(gray_prev, gray_curr)
+def is_duplicate(face):
+    """Check if the captured face already exists in stored_faces."""
+    if stored_faces.shape[0] == 0:
+        return False  
 
-        # If SSIM is too high, no motion is detected (photo)
-        if ssim_score > 0.92:
-            frame_counter += 1
-        else:
-            frame_counter = 0  # Reset if movement is detected
+    face_gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
 
-        if frame_counter > 30:  # If no motion for 30 frames (~1 sec)
+    for stored_face in stored_faces:
+        stored_face_gray = cv2.cvtColor(stored_face, cv2.COLOR_BGR2GRAY)
+        
+        if face_gray.shape != stored_face_gray.shape:
+            continue
+
+        mse_score = mse(face_gray, stored_face_gray)
+        ssim_score = ssim(face_gray, stored_face_gray)
+
+        if mse_score < 200 and ssim_score > 0.8:
             return True
 
-    # Step 3: Edge detection (photos/videos have sharper edges)
-    edges = cv2.Canny(face_region, 100, 200)
-    edge_density = np.sum(edges) / (w * h)
+    return False
 
-    if edge_density > 0.08:  # High edge density = fake face
+def detect_fake_face(frame):
+    """Detects if a face is being shown from a photo"""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F).var()
+    
+    if laplacian < 50:  # Low variance = likely a fake face
         return True
+    return False
 
-    previous_frame = frame.copy()
-    return False  # If no fake indicators are found, return False
-
-# Main Loop
 while True:
     ret, frame = video.read()
     
     if not ret:
         print("Error: Could not capture frame.")
-        lcd.lcd_display_string("Camera Error!", 1)
         break
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = facedetect.detectMultiScale(gray, 1.3, 5)
-
+    
     for (x, y, w, h) in faces:
         crop_img = frame[y:y+h, x:x+w]
 
         if crop_img.size == 0:
-            print("Error: Empty face image.")
             continue
+
+        if detect_fake_face(crop_img):
+            lcd_display("Fake Face Detected!", 0x80)
+            speak("Fake Face Detected! Use a Real Face")
+            time.sleep(2)
+            continue  
 
         resized_img = cv2.resize(crop_img, (50, 50))
 
-        # Fake face detection
-        is_fake = detect_fake_face(frame, gray, (x, y, w, h))
-
-        if is_fake:
-            cv2.putText(frame, "Fake Face Detected!", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 
-                        0.6, (0, 0, 255), 2)
-            lcd.lcd_clear()
-            lcd.lcd_display_string("Fake Face Detected!", 1)
-            lcd.lcd_display_string("Use a Real Face", 2)
+        if is_duplicate(resized_img):
+            lcd_display("Duplicate Face!", 0x80)
             time.sleep(2)
-        else:
-            lcd.lcd_clear()
-            lcd.lcd_display_string("Face Detected!", 1)
+            continue
 
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (50, 50, 255), 1)
+        faces_data.append(resized_img)
+        rfid_data.append(card_id)
+
+        lcd_display("Face Detected!", 0x80)
+        time.sleep(1)
 
     cv2.imshow("Frame", frame)
     k = cv2.waitKey(1)
 
-    if k == ord('q'):
+    if k == ord('q') or len(faces_data) == 100:
         break
 
 video.release()
 cv2.destroyAllWindows()
-lcd.lcd_clear()
 
-print("Process completed.")
+# Save Data
+faces_data = np.array(faces_data)
+stored_names.append(name)
+
+with open(faces_file, 'wb') as f:
+    pickle.dump(faces_data, f)
+with open(rfid_file, 'wb') as f:
+    pickle.dump(rfid_data, f)
+with open(names_file, 'wb') as f:
+    pickle.dump(stored_names, f)
+
+print("✅ Face and RFID data saved successfully!")
+
+# Attendance Taking
+if name not in attended:
+    ts = time.time()
+    date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
+    timestamp = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+    attendance_file = f"Attendance/Attendance_{date}.csv"
+
+    file_exists = os.path.isfile(attendance_file)
+    with open(attendance_file, "a", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        if not file_exists:
+            writer.writerow(["NAME", "RFID", "DATE", "TIME"])
+        writer.writerow([name, card_id, date, timestamp])
+
+    attended.add(name)
+    lcd_display("Attendance Taken", 0x80)
+    speak("Attendance Taken")
+    GPIO.output(BUZZER_PIN, GPIO.HIGH)
+    time.sleep(1)
+    GPIO.output(BUZZER_PIN, GPIO.LOW)
+
+print("✅ Attendance Recorded!")
