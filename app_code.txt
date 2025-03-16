@@ -13,53 +13,55 @@ st_autorefresh(interval=2000, key="refresh")
 ts = time.time()
 date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
 
-# Attendance CSV File Path
-csv_file_path = f"Attendance/Attendance_{date}.csv"
+# Attendance Folder Path
+attendance_folder = "Attendance"
 
 # Display header with current date
 st.header(f"Attendance Record for {date}")
 
-if os.path.exists(csv_file_path):
-    # Define expected columns
-    expected_columns = ['NAME', 'RFID', 'DATE', 'TIME']
+# List all attendance files
+attendance_files = [f for f in os.listdir(attendance_folder) if f.startswith("Attendance_") and f.endswith(".csv")]
 
-    # Check CSV header format
-    with open(csv_file_path, 'r') as f:
-        header_line = f.readline().strip()
-        header_fields = header_line.split(',')
+# Initialize an empty DataFrame to store combined data
+all_data = []
 
-    # Ensure CSV has the correct format
-    if len(header_fields) != len(expected_columns):
-        st.error(
-            f"CSV file format error: Expected {len(expected_columns)} columns {expected_columns} "
-            f"but found {len(header_fields)} columns: {header_fields}. "
-            "Please update or delete the file to use the correct format."
-        )
-    else:
-        # Read CSV file
-        df = pd.read_csv(csv_file_path)
+# Read each attendance file and extract date-wise attendance records
+for file in attendance_files:
+    file_path = os.path.join(attendance_folder, file)
 
-        # Search filter
-        search_query = st.text_input("Search Attendance Record:", "")
-        if search_query:
-            filtered_df = df[df.apply(lambda row: row.astype(str).str.contains(search_query, case=False, na=False).any(), axis=1)]
-        else:
-            filtered_df = df
+    # Read the file
+    df = pd.read_csv(file_path)
 
-        # Display Data Table
-        st.dataframe(filtered_df.style.highlight_max(axis=0))
+    # Extract date from the filename (format: Attendance_DD-MM-YYYY.csv)
+    file_date = file.replace("Attendance_", "").replace(".csv", "")
 
-        # Generate Attendance Count Per Person
-        attendance_count = df["NAME"].value_counts()
+    # Append data
+    for name in df["NAME"].unique():
+        all_data.append({"DATE": file_date, "NAME": name})
 
-        # Plot Graph
-        st.subheader("Attendance Frequency Graph")
-        fig, ax = plt.subplots()
-        attendance_count.plot(kind="bar", ax=ax, color="skyblue")
-        ax.set_xlabel("Name")
-        ax.set_ylabel("Number of Check-ins")
-        ax.set_title("Attendance Count Per Person")
-        st.pyplot(fig)
+# Convert list to DataFrame
+df_daywise = pd.DataFrame(all_data)
 
-else:
-    st.warning(f"No attendance record found for {date}.")
+# Sort data by date
+df_daywise["DATE"] = pd.to_datetime(df_daywise["DATE"], format="%d-%m-%Y")
+df_daywise = df_daywise.sort_values("DATE")
+
+# Display Table
+st.subheader("Day-wise Attendance List")
+st.dataframe(df_daywise)
+
+# Plot Day-wise Attendance Graph
+st.subheader("Attendance Trend Over Time (Name vs Date)")
+fig, ax = plt.subplots(figsize=(10, 6))
+
+# Scatter plot to show name attendance over dates
+ax.scatter(df_daywise["DATE"], df_daywise["NAME"], marker="o", color="b")
+
+ax.set_xlabel("Date")
+ax.set_ylabel("Name")
+ax.set_title("Attendance Record (Date vs Name)")
+
+plt.xticks(rotation=45)  # Rotate x-axis labels for better readability
+
+# Show the plot
+st.pyplot(fig)
