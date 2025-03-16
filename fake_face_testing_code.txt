@@ -13,7 +13,8 @@ from mfrc522 import SimpleMFRC522
 from sklearn.neighbors import KNeighborsClassifier
 from skimage.metrics import structural_similarity as ssim  
 
-# GPIO Setup
+# Disable GPIO Warnings
+GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 BUZZER_PIN = 17  
 GPIO.setup(BUZZER_PIN, GPIO.OUT)
@@ -29,24 +30,6 @@ reader = SimpleMFRC522()
 LCD_ADDRESS = 0x27  
 bus = smbus2.SMBus(1)  
 
-# LCD Functions
-def lcd_byte(bits, mode):
-    bus.write_byte(LCD_ADDRESS, mode | (bits & 0xF0) | 0x08)
-    bus.write_byte(LCD_ADDRESS, mode | ((bits << 4) & 0xF0) | 0x08)
-
-def lcd_display(message, line):
-    lcd_byte(line, 0)
-    for char in message.ljust(16, " "):
-        lcd_byte(ord(char), 1)
-
-# Initialize LCD
-lcd_display("Initializing...", 0x80)
-time.sleep(2)
-
-def speak(text):
-    engine.say(text)
-    engine.runAndWait()
-
 # Ensure Data Directory Exists
 if not os.path.exists("data"):
     os.makedirs("data")
@@ -56,166 +39,123 @@ faces_file = 'data/faces_data.pkl'
 names_file = 'data/names.pkl'
 rfid_file = 'data/rfid_data.pkl'
 
-# Load Existing Data
-if os.path.exists(faces_file):
-    with open(faces_file, 'rb') as f:
-        stored_faces = pickle.load(f).reshape(-1, 50, 50, 3)
-else:
-    stored_faces = np.empty((0, 50, 50, 3), dtype=np.uint8)
-
-if os.path.exists(rfid_file):
-    with open(rfid_file, 'rb') as f:
-        stored_rfid = pickle.load(f)
-else:
-    stored_rfid = []
-
-if os.path.exists(names_file):
-    with open(names_file, 'rb') as f:
-        stored_names = pickle.load(f)
-else:
-    stored_names = []
-
-# Read RFID Card
-print("Scan your RFID card...")
-lcd_display("Scan RFID Card...", 0x80)
-
+# Load Data
 try:
-    card_id, card_text = reader.read()
-    print(f"RFID Card ID: {card_id}")
-    name = input("Enter Your Name: ")
-except Exception as e:
-    print(f"RFID Error: {e}")
-    lcd_display("RFID Error!", 0x80)
-    exit()
+    with open(names_file, 'rb') as w:
+        LABELS = pickle.load(w)
+    with open(faces_file, 'rb') as f:
+        FACES = pickle.load(f)
+    with open(rfid_file, 'rb') as r:
+        RFID_LIST = pickle.load(r)
+except FileNotFoundError:
+    print("Warning: No previous data found. Starting fresh.")
+    LABELS = []
+    FACES = np.empty((0, 50, 50, 3), dtype=np.uint8)
+    RFID_LIST = []
 
-# Open Camera
+# Ensure `LABELS` has the same length as `FACES`
+if len(LABELS) != len(FACES):
+    print(f"Warning: Mismatch in data size. Faces: {len(FACES)}, Labels: {len(LABELS)}")
+    LABELS = LABELS[:len(FACES)]  # Trim to match FACES length
+
+# Convert `FACES` into a valid shape for KNN
+if len(FACES) > 0:
+    FACES = FACES.reshape(FACES.shape[0], -1)  
+
+# Train KNN only if data is available
+if len(FACES) > 0:
+    knn = KNeighborsClassifier(n_neighbors=5)
+    knn.fit(FACES, LABELS)
+else:
+    print("Warning: No face data available. Cannot train KNN.")
+    knn = None
+
+attended = set()
+
+# Fake Face Detection Using Laplacian Variance
+def detect_fake_face(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F).var()
+    return laplacian < 50  # If variance is low, it's likely a photo
+
+# Main Loop
 video = cv2.VideoCapture(0)
 if not video.isOpened():
     print("Error: Could not open camera.")
-    lcd_display("Camera Error!", 0x80)
     exit()
-
-# Load Haarcascade for face detection
-facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-
-faces_data = []
-rfid_data = []
-attended = set()
-previous_frame = None  
-fake_face_count = 0  
-
-def mse(image1, image2):
-    """Mean Squared Error (MSE) between two images"""
-    err = np.sum((image1.astype("float") - image2.astype("float")) ** 2)
-    err /= float(image1.shape[0] * image1.shape[1])
-    return err
-
-def is_duplicate(face):
-    """Check if the captured face already exists in stored_faces."""
-    if stored_faces.shape[0] == 0:
-        return False  
-
-    face_gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
-
-    for stored_face in stored_faces:
-        stored_face_gray = cv2.cvtColor(stored_face, cv2.COLOR_BGR2GRAY)
-        
-        if face_gray.shape != stored_face_gray.shape:
-            continue
-
-        mse_score = mse(face_gray, stored_face_gray)
-        ssim_score = ssim(face_gray, stored_face_gray)
-
-        if mse_score < 200 and ssim_score > 0.8:
-            return True
-
-    return False
-
-def detect_fake_face(frame):
-    """Detects if a face is being shown from a photo"""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    laplacian = cv2.Laplacian(gray, cv2.CV_64F).var()
-    
-    if laplacian < 50:  # Low variance = likely a fake face
-        return True
-    return False
 
 while True:
     ret, frame = video.read()
-    
     if not ret:
-        print("Error: Could not capture frame.")
+        print("Error capturing frame.")
         break
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
     faces = facedetect.detectMultiScale(gray, 1.3, 5)
-    
+
     for (x, y, w, h) in faces:
         crop_img = frame[y:y+h, x:x+w]
-
         if crop_img.size == 0:
             continue
 
         if detect_fake_face(crop_img):
-            lcd_display("Fake Face Detected!", 0x80)
-            speak("Fake Face Detected! Use a Real Face")
-            time.sleep(2)
-            continue  
-
-        resized_img = cv2.resize(crop_img, (50, 50))
-
-        if is_duplicate(resized_img):
-            lcd_display("Duplicate Face!", 0x80)
-            time.sleep(2)
+            print("Fake Face Detected!")
             continue
 
-        faces_data.append(resized_img)
-        rfid_data.append(card_id)
+        resized_img = cv2.resize(crop_img, (50, 50)).flatten().reshape(1, -1)
 
-        lcd_display("Face Detected!", 0x80)
-        time.sleep(1)
+        # Check if KNN is trained before predicting
+        if knn is not None:
+            try:
+                recognized_name = knn.predict(resized_img)[0]
+                print("Recognized:", recognized_name)
+            except Exception as e:
+                print("KNN Prediction Error:", e)
+                continue
+        else:
+            print("KNN Model Not Trained!")
+            continue
+
+        print("Put your RFID Card...")
+
+        try:
+            card_id, _ = reader.read()
+            print(f"RFID Card Detected: {card_id}")
+        except Exception as e:
+            print(f"RFID Error: {e}")
+            continue
+
+        if recognized_name not in attended and str(card_id).strip() in [str(rfid).strip() for rfid in RFID_LIST]:
+            ts = time.time()
+            date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
+            timestamp = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+            attendance_file = f"Attendance/Attendance_{date}.csv"
+
+            file_exists = os.path.isfile(attendance_file)
+            with open(attendance_file, "a", newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                if not file_exists:
+                    writer.writerow(["NAME", "RFID", "DATE", "TIME"])
+                writer.writerow([recognized_name, card_id, date, timestamp])
+
+            attended.add(recognized_name)
+            print(f"Attendance Taken for {recognized_name}")
+
+            # Buzzer Alert
+            GPIO.output(BUZZER_PIN, GPIO.HIGH)
+            time.sleep(1)
+            GPIO.output(BUZZER_PIN, GPIO.LOW)
+
+        else:
+            print("Unauthorized Access! Try Again.")
 
     cv2.imshow("Frame", frame)
-    k = cv2.waitKey(1)
-
-    if k == ord('q') or len(faces_data) == 100:
+    if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 video.release()
 cv2.destroyAllWindows()
+GPIO.cleanup()
 
-# Save Data
-faces_data = np.array(faces_data)
-stored_names.append(name)
-
-with open(faces_file, 'wb') as f:
-    pickle.dump(faces_data, f)
-with open(rfid_file, 'wb') as f:
-    pickle.dump(rfid_data, f)
-with open(names_file, 'wb') as f:
-    pickle.dump(stored_names, f)
-
-print("✅ Face and RFID data saved successfully!")
-
-# Attendance Taking
-if name not in attended:
-    ts = time.time()
-    date = datetime.fromtimestamp(ts).strftime("%d-%m-%Y")
-    timestamp = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
-    attendance_file = f"Attendance/Attendance_{date}.csv"
-
-    file_exists = os.path.isfile(attendance_file)
-    with open(attendance_file, "a", newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        if not file_exists:
-            writer.writerow(["NAME", "RFID", "DATE", "TIME"])
-        writer.writerow([name, card_id, date, timestamp])
-
-    attended.add(name)
-    lcd_display("Attendance Taken", 0x80)
-    speak("Attendance Taken")
-    GPIO.output(BUZZER_PIN, GPIO.HIGH)
-    time.sleep(1)
-    GPIO.output(BUZZER_PIN, GPIO.LOW)
-
-print("✅ Attendance Recorded!")
+print("Process completed.")
