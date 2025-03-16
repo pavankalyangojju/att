@@ -1,0 +1,146 @@
+import cv2
+import pickle
+import numpy as np
+import os
+import RPi.GPIO as GPIO
+from mfrc522 import SimpleMFRC522
+from skimage.metrics import structural_similarity as ssim
+import time
+import I2C_LCD_driver  
+
+# Initialize RFID Reader
+reader = SimpleMFRC522()
+
+# Initialize LCD
+lcd = I2C_LCD_driver.lcd()
+lcd.lcd_clear()
+lcd.lcd_display_string("Initializing...", 1)
+time.sleep(2)
+
+# Open Camera
+video = cv2.VideoCapture(0)
+if not video.isOpened():
+    print("Error: Could not open camera.")
+    lcd.lcd_display_string("Camera Error!", 1)
+    exit()
+
+# Load Haarcascade for face detection
+cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+eye_cascade_path = cv2.data.haarcascades + 'haarcascade_eye.xml'
+
+if not os.path.exists(cascade_path) or not os.path.exists(eye_cascade_path):
+    print("Error: Haarcascade file missing.")
+    lcd.lcd_display_string("Haarcascade Missing!", 1)
+    exit()
+
+facedetect = cv2.CascadeClassifier(cascade_path)
+eye_detect = cv2.CascadeClassifier(eye_cascade_path)
+
+faces_data = []
+rfid_data = []
+previous_frame = None
+fake_face_count = 0
+frame_counter = 0
+motion_detected = False
+
+# Read RFID Card
+print("Scan your RFID card...")
+lcd.lcd_display_string("Scan RFID Card...", 1)
+
+try:
+    card_id, card_text = reader.read()
+    print(f"RFID Card ID: {card_id}")
+    name = input("Enter Your Name: ")
+except Exception as e:
+    print(f"RFID Error: {e}")
+    lcd.lcd_display_string("RFID Read Error!", 1)
+    exit()
+
+# Fake Face Detection
+def detect_fake_face(frame, gray, face_coords):
+    global previous_frame, fake_face_count, frame_counter, motion_detected
+
+    x, y, w, h = face_coords
+    face_region = gray[y:y+h, x:x+w]
+
+    # Step 1: Eye detection (real people blink)
+    eyes = eye_detect.detectMultiScale(face_region, 1.1, 4)
+    if len(eyes) == 0:
+        fake_face_count += 1  # No eyes detected (could be fake)
+    else:
+        fake_face_count = 0  # Eyes detected, reset counter
+
+    # Step 2: Compare with previous frame (motion detection)
+    if previous_frame is not None:
+        gray_prev = cv2.cvtColor(previous_frame, cv2.COLOR_BGR2GRAY)
+        gray_curr = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        ssim_score = ssim(gray_prev, gray_curr)
+
+        # If SSIM is too high, no motion is detected (photo)
+        if ssim_score > 0.92:
+            frame_counter += 1
+        else:
+            frame_counter = 0  # Reset if movement is detected
+
+        if frame_counter > 30:  # If no motion for 30 frames (~1 sec)
+            return True
+
+    # Step 3: Edge detection (photos/videos have sharper edges)
+    edges = cv2.Canny(face_region, 100, 200)
+    edge_density = np.sum(edges) / (w * h)
+
+    if edge_density > 0.08:  # High edge density = fake face
+        return True
+
+    previous_frame = frame.copy()
+    return False  # If no fake indicators are found, return False
+
+# Main Loop
+while True:
+    ret, frame = video.read()
+    
+    if not ret:
+        print("Error: Could not capture frame.")
+        lcd.lcd_display_string("Camera Error!", 1)
+        break
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = facedetect.detectMultiScale(gray, 1.3, 5)
+
+    for (x, y, w, h) in faces:
+        crop_img = frame[y:y+h, x:x+w]
+
+        if crop_img.size == 0:
+            print("Error: Empty face image.")
+            continue
+
+        resized_img = cv2.resize(crop_img, (50, 50))
+
+        # Fake face detection
+        is_fake = detect_fake_face(frame, gray, (x, y, w, h))
+
+        if is_fake:
+            cv2.putText(frame, "Fake Face Detected!", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 
+                        0.6, (0, 0, 255), 2)
+            lcd.lcd_clear()
+            lcd.lcd_display_string("Fake Face Detected!", 1)
+            lcd.lcd_display_string("Use a Real Face", 2)
+            time.sleep(2)
+        else:
+            lcd.lcd_clear()
+            lcd.lcd_display_string("Face Detected!", 1)
+
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (50, 50, 255), 1)
+
+    cv2.imshow("Frame", frame)
+    k = cv2.waitKey(1)
+
+    if k == ord('q'):
+        break
+
+video.release()
+cv2.destroyAllWindows()
+lcd.lcd_clear()
+
+print("Process completed.")
