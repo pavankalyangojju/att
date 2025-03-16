@@ -8,7 +8,7 @@ from skimage.metrics import structural_similarity as ssim
 import time
 from RPLCD.i2c import CharLCD
 
-# ✅ Initialize LCD (I2C Address may be 0x27 or 0x3F, check using `i2cdetect -y 1`)
+# ✅ Initialize LCD (I2C Address: 0x27 or 0x3F)
 lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1,
               cols=16, rows=2, dotsize=8)
 
@@ -161,7 +161,7 @@ else:
 show_message("Data Saved", "Successfully!", 3)
 print("Data saved successfully!")
 
-# ✅ **Loop Welcome Message Until Stopped**
+# ✅ **Keep Displaying "HI Welcome to Attendance System"**
 while True:
     show_message("HI Welcome to", "Attendance System", 5)
 
