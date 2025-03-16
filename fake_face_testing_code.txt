@@ -23,8 +23,8 @@ def show_message(line1, line2="", duration=3):
     time.sleep(duration)
     lcd.clear()
 
-# ✅ Display Welcome Message Initially
-show_message("HI Welcome to", "Attendance System", 2)
+# ✅ Display Welcome Message **ONLY ONCE**
+show_message("HI Welcome to", "Attendance System", 3)
 
 # ✅ Setup GPIO
 GPIO.setwarnings(False)
@@ -70,14 +70,18 @@ except Exception as e:
     print(f"RFID Error: {e}")
     exit()
 
-# ✅ Display Face Capture Message
-show_message("Put your face", "towards camera")
+# ✅ Display Face Capture Message with Progress
+lcd.clear()
+lcd.write_string("Capturing Face")
+lcd.crlf()
+lcd.write_string("Progress: 0%")
 print("Put your face towards camera...")
 
 # ✅ LED ON while capturing face
 GPIO.output(LED_PIN, GPIO.HIGH)
 
-while True:
+# Face capture loop with real-time LCD progress update
+for progress in range(101):  # Loop from 0 to 100
     ret, frame = video.read()
     
     if not ret:
@@ -96,14 +100,21 @@ while True:
             rfid_data.append(card_id)
 
         i += 1
-        cv2.putText(frame, str(len(faces_data)), (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 255), 1)
+        cv2.putText(frame, f"{progress}%", (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 255), 1)
         cv2.rectangle(frame, (x, y), (x + w, y + h), (50, 50, 255), 1)
 
     cv2.imshow("Frame", frame)
-    k = cv2.waitKey(1)
 
-    if k == ord('q') or len(faces_data) == 100:
-        break
+    # ✅ Update LCD with current progress
+    lcd.clear()
+    lcd.write_string("Capturing Face")
+    lcd.crlf()
+    lcd.write_string(f"Progress: {progress}%")
+    
+    time.sleep(1)  # Wait for 1 second before updating progress
+
+    if progress == 100 or len(faces_data) == 100:
+        break  # Exit loop when progress reaches 100%
 
 video.release()
 cv2.destroyAllWindows()
@@ -161,9 +172,8 @@ else:
 show_message("Data Saved", "Successfully!", 3)
 print("Data saved successfully!")
 
-# ✅ **Keep Displaying "HI Welcome to Attendance System"**
-while True:
-    show_message("HI Welcome to", "Attendance System", 5)
+# ✅ **LCD will now remain blank instead of showing "HI Welcome to Attendance System" again**
+lcd.clear()  # Make LCD blank
 
 # Cleanup
 GPIO.cleanup()
