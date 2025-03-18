@@ -113,8 +113,6 @@ if not os.path.exists("Attendance"):
     os.makedirs("Attendance")
 
 attended = set()  
-camera_off_time = None  
-camera_active = True  
 
 def buzzer_and_lcd_message(name):
     for _ in range(2):
@@ -157,11 +155,18 @@ while True:
         speak("Put your RFID Card")
 
         try:
-            card_id, _ = reader.read()  
+            card_id, card_text = reader.read()  
+            if not card_id:
+                raise ValueError("No RFID card detected!")
             print(f"RFID Card Detected: {card_id}")
         except Exception as e:
-            print("RFID Error:", e)
-            continue
+            lcd_display("RFID Read Error!", LINE_1)
+            lcd_display("Try Again", LINE_2)
+            print(f"RFID Error: {e}")
+            time.sleep(2)
+            lcd_display("", LINE_1)
+            lcd_display("", LINE_2)
+            continue  
 
         # ✅ CHECK IF ATTENDANCE ALREADY TAKEN
         date_today = datetime.now().strftime("%d-%m-%Y")
