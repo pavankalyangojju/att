@@ -15,7 +15,7 @@ lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1, cols=16, rows=2, dot
 lcd.clear()
 lcd.write_string("HI, Welcome to")
 lcd.crlf()
-lcd.write_string("AttendanceSystem")
+lcd.write_string("Attendance System")
 time.sleep(3)
 lcd.clear()
 
@@ -84,7 +84,7 @@ except Exception as e:
 lcd.clear()
 lcd.write_string("Look at Camera")
 lcd.crlf()
-lcd.write_string("Stay until Light OFF")
+lcd.write_string("Stay still, No Fake!")
 print("Put your face towards the camera and stay until the light turns off...")
 
 # ✅ LED ON while capturing face
@@ -92,16 +92,16 @@ GPIO.output(LED_PIN, GPIO.HIGH)
 
 faces_data = []
 rfid_data = []
+names_data = []
 i = 0
 captured_face = None
-
 fake_face_detected = False  # Flag for fake face detection
 
 # ✅ Capture First Frame for Fake Face Detection
 _, first_frame = video.read()
 first_frame_gray = cv2.cvtColor(first_frame, cv2.COLOR_BGR2GRAY)
 
-time.sleep(2)  # Wait for a short delay to capture the second frame
+time.sleep(2)  # Wait for 2 seconds to capture the second frame
 
 # ✅ Capture Second Frame for Fake Face Detection
 _, second_frame = video.read()
@@ -115,14 +115,14 @@ if similarity > 0.98:  # High similarity means no movement (likely fake)
     lcd.write_string("This is a")
     lcd.crlf()
     lcd.write_string("Fake Face!")
-    print("Fake face detected! No movement detected.")
+    print("❌ Fake face detected! No movement detected.")
     time.sleep(3)
     lcd.clear()
     GPIO.cleanup()
     video.release()
     exit()
 
-print("Face movement detected, continuing...")
+print("✅ Face movement detected, continuing...")
 
 while True:
     ret, frame = video.read()
@@ -141,6 +141,7 @@ while True:
         if len(faces_data) < 100 and i % 10 == 0:
             faces_data.append(resized_img)
             rfid_data.append(card_id)
+            names_data.append(name)
             captured_face = resized_img
 
         i += 1
@@ -169,15 +170,14 @@ faces_data = np.asarray(faces_data).reshape(len(faces_data), 50, 50, 3)
 
 # ✅ Save Names
 if not os.path.exists(names_file):
-    names = [name] * len(faces_data)
     with open(names_file, 'wb') as f:
-        pickle.dump(names, f)
+        pickle.dump(names_data, f)
 else:
     with open(names_file, 'rb') as f:
-        names = pickle.load(f)
-    names.extend([name] * len(faces_data))
+        stored_names = pickle.load(f)
+    stored_names.extend(names_data)
     with open(names_file, 'wb') as f:
-        pickle.dump(names, f)
+        pickle.dump(stored_names, f)
 
 # ✅ Save RFID Data
 if not os.path.exists(rfid_file):
@@ -208,7 +208,7 @@ lcd.clear()
 lcd.write_string("Data Saved")
 lcd.crlf()
 lcd.write_string("Successfully!")
-print("Data saved successfully!")
+print("✅ Data saved successfully!")
 
 # Cleanup
 GPIO.cleanup()
