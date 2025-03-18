@@ -8,7 +8,7 @@ from skimage.metrics import structural_similarity as ssim
 import time
 from RPLCD.i2c import CharLCD
 
-# ✅ Initialize LCD (I2C Address may be 0x27 or 0x3F, check using `i2cdetect -y 1`)
+# ✅ Initialize LCD
 lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1, cols=16, rows=2, dotsize=8)
 
 # ✅ Display Welcome Message
@@ -42,15 +42,12 @@ if not video.isOpened():
 # Load Haarcascade for face detection
 facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-# Create data directory
-if not os.path.exists('data'):
-    os.makedirs('data')
-
+# Data storage paths
 faces_file = 'data/faces_data.pkl'
 rfid_file = 'data/rfid_data.pkl'
 names_file = 'data/names.pkl'
 
-# ✅ Display Scan Card Message
+# ✅ Scan RFID Card
 lcd.write_string("Scan your CARD")
 print("Scan your RFID card...")
 
@@ -59,8 +56,8 @@ try:
     print(f"RFID Card ID: {card_id}")
     lcd.clear()
 
-    # ✅ Check if the RFID is already registered
-    if os.path.exists(rfid_file) and os.path.exists(faces_file):
+    # ✅ Check if RFID already exists
+    if os.path.exists(rfid_file):
         with open(rfid_file, 'rb') as f:
             stored_rfid = pickle.load(f)
 
@@ -68,7 +65,7 @@ try:
             lcd.write_string("Face already")
             lcd.crlf()
             lcd.write_string("registered!")
-            print("Your face is already registered, no need to register again.")
+            print("Your face is already registered, no need again.")
             time.sleep(3)
             lcd.clear()
             GPIO.cleanup()
@@ -83,7 +80,15 @@ except Exception as e:
     print(f"RFID Error: {e}")
     exit()
 
-# ✅ Display Face Capture Message with Stay Instruction
+# ✅ Check if the same face exists (Even if RFID is new)
+if os.path.exists(faces_file):
+    with open(faces_file, 'rb') as f:
+        stored_faces = pickle.load(f)
+
+    # Convert stored faces to grayscale
+    stored_faces_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in stored_faces]
+
+# ✅ Display Face Capture Message
 lcd.clear()
 lcd.write_string("Look at Camera")
 lcd.crlf()
@@ -96,6 +101,7 @@ GPIO.output(LED_PIN, GPIO.HIGH)
 faces_data = []
 rfid_data = []
 i = 0
+captured_face = None
 
 while True:
     ret, frame = video.read()
@@ -110,10 +116,29 @@ while True:
     for (x, y, w, h) in faces:
         crop_img = frame[y:y+h, x:x+w]
         resized_img = cv2.resize(crop_img, (50, 50))
-        
+
+        # ✅ Compare new face with stored faces
+        if os.path.exists(faces_file):
+            new_face_gray = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
+
+            for stored_face in stored_faces_gray:
+                similarity = ssim(stored_face, new_face_gray)
+                
+                if similarity > 0.75:  # Threshold for matching faces
+                    lcd.clear()
+                    lcd.write_string("Face already")
+                    lcd.crlf()
+                    lcd.write_string("registered!")
+                    print("Your face is already registered, no need again.")
+                    time.sleep(3)
+                    lcd.clear()
+                    GPIO.cleanup()
+                    exit()
+
         if len(faces_data) < 100 and i % 10 == 0:
             faces_data.append(resized_img)
             rfid_data.append(card_id)
+            captured_face = resized_img
 
         i += 1
         cv2.putText(frame, str(len(faces_data)), (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 255), 1)
