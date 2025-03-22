@@ -72,6 +72,13 @@ def lcd_display(message, line):
 
 lcd_init()
 
+# Display welcome message
+lcd_display("HI,Welcome to", LINE_1)
+lcd_display("AttendanceSystem", LINE_2)
+time.sleep(3)
+lcd_display("", LINE_1)
+lcd_display("", LINE_2)
+
 def speak(text):
     engine.say(text)
     engine.runAndWait()
@@ -169,7 +176,6 @@ while True:
             print("Prediction Error:", e)
             continue
 
-        # Clear previous message
         lcd_display("Put RFID Card", LINE_1)
         lcd_display("                ", LINE_2)
         speak("Put your RFID Card")
@@ -236,7 +242,6 @@ while True:
                 writer.writerow(COL_NAMES)
             writer.writerow([recognized_name, card_id, date_today, timestamp])
 
-        # Save photo inside Attendance/images
         images_folder = "Attendance/images"
         if not os.path.exists(images_folder):
             os.makedirs(images_folder)
@@ -244,7 +249,6 @@ while True:
         photo_filename = f"{images_folder}/{recognized_name}_{datetime.now().strftime('%H%M%S')}.jpg"
         cv2.imwrite(photo_filename, frame)
 
-        # Send to Telegram with full caption
         caption = (
             f" Attendance Marked\n"
             f" Name: {recognized_name}\n"
@@ -259,15 +263,13 @@ while True:
         send_attendance_api(recognized_name, date_today, timestamp)
         buzzer_and_lcd_message(recognized_name)
 
-        # Turn off camera temporarily
         lcd_display("Next Person", LINE_1)
         lcd_display("Please Wait...", LINE_2)
 
-        cv2.destroyWindow("Frame")  # Close the camera display
-        video.release()             # Release the camera
-        time.sleep(10)              # Wait for 10 seconds
+        cv2.destroyWindow("Frame")
+        video.release()
+        time.sleep(10)
 
-        # Reopen the camera
         video = cv2.VideoCapture(0)
         if not video.isOpened():
             lcd_display("Camera Error!", LINE_1)
