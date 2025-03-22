@@ -194,9 +194,9 @@ while True:
 
         if file_exists:
             with open(attendance_file, "r") as f:
-                reader = csv.reader(f)
-                next(reader)
-                for row in reader:
+                csv_reader = csv.reader(f)  # Renamed to avoid conflict with RFID reader
+                next(csv_reader)
+                for row in csv_reader:
                     if row[0] == recognized_name and row[1] == str(card_id):
                         already_taken = True
                         break
