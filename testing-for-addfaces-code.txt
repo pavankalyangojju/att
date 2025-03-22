@@ -213,7 +213,7 @@ while True:
         attendance_file = f"Attendance/Attendance_{date_today}.csv"
 
         file_exists = os.path.isfile(attendance_file)
-        already_taken = False
+        attendance_count = 0
 
         if file_exists:
             with open(attendance_file, "r") as f:
@@ -221,8 +221,16 @@ while True:
                 next(csv_reader)
                 for row in csv_reader:
                     if row[0] == recognized_name and row[1] == str(card_id):
-                        already_taken = True
-                        break
+                        attendance_count += 1
+
+        if attendance_count >= 2:
+            lcd_display("Two Time", LINE_1)
+            lcd_display("Is Over!", LINE_2)
+            speak("Two times attendance is over")
+            time.sleep(3)
+            lcd_display("", LINE_1)
+            lcd_display("", LINE_2)
+            continue
 
         if already_taken:
             lcd_display("Attendance", LINE_1)
