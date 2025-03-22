@@ -219,16 +219,20 @@ while True:
                 writer.writerow(COL_NAMES)
             writer.writerow([recognized_name, card_id, date_today, timestamp])
 
-        # Save photo
-        photo_filename = f"Attendance/{recognized_name}_{datetime.now().strftime('%H%M%S')}.jpg"
+        # Save photo inside Attendance/images
+        images_folder = "Attendance/images"
+        if not os.path.exists(images_folder):
+            os.makedirs(images_folder)
+
+        photo_filename = f"{images_folder}/{recognized_name}_{datetime.now().strftime('%H%M%S')}.jpg"
         cv2.imwrite(photo_filename, frame)
 
-        # Send photo to Telegram with full info
+        # Send to Telegram with full caption
         caption = (
-            f"✅ Attendance Marked\n"
-            f"👤 Name: {recognized_name}\n"
-            f"📅 Date: {date_today}\n"
-            f"⏰ Time: {timestamp}"
+            f" Attendance Marked\n"
+            f" Name: {recognized_name}\n"
+            f" Date: {date_today}\n"
+            f" Time: {timestamp}"
         )
         send_telegram_photo(photo_filename, caption=caption)
 
