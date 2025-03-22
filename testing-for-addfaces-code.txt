@@ -169,7 +169,9 @@ while True:
             print("Prediction Error:", e)
             continue
 
+        # Clear previous message
         lcd_display("Put RFID Card", LINE_1)
+        lcd_display("                ", LINE_2)  # Clear line 2
         speak("Put your RFID Card")
 
         try:
