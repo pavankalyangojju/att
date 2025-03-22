@@ -263,8 +263,8 @@ while True:
         send_attendance_api(recognized_name, date_today, timestamp)
         buzzer_and_lcd_message(recognized_name)
 
-        lcd_display("Next Person", LINE_1)
-        lcd_display("Please Wait...", LINE_2)
+        lcd_display("", LINE_1)
+        lcd_display("", LINE_2)
 
         cv2.destroyWindow("Frame")
         video.release()
