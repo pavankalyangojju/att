@@ -227,7 +227,17 @@ while True:
             lcd_display("Two Time Is Over", LINE_1)
             lcd_display("Not Allowed", LINE_2)
             speak("Two time is over, not allowed")
-            time.sleep(3)
+
+            # Turn off camera temporarily
+            cv2.destroyWindow("Frame")
+            video.release()
+            time.sleep(5)
+            video = cv2.VideoCapture(0)
+            if not video.isOpened():
+                lcd_display("Camera Error!", LINE_1)
+                print("Error: Could not reopen camera.")
+                GPIO.cleanup()
+                exit()
             lcd_display("", LINE_1)
             lcd_display("", LINE_2)
             continue
