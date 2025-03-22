@@ -224,18 +224,9 @@ while True:
                         attendance_count += 1
 
         if attendance_count >= 2:
-            lcd_display("Two Time", LINE_1)
-            lcd_display("Is Over!", LINE_2)
-            speak("Two times attendance is over")
-            time.sleep(3)
-            lcd_display("", LINE_1)
-            lcd_display("", LINE_2)
-            continue
-
-        if already_taken:
-            lcd_display("Attendance", LINE_1)
-            lcd_display("Already Taken!", LINE_2)
-            speak("Attendance already taken, no need again.")
+            lcd_display("Two Time Is Over", LINE_1)
+            lcd_display("Not Allowed", LINE_2)
+            speak("Two time is over, not allowed")
             time.sleep(3)
             lcd_display("", LINE_1)
             lcd_display("", LINE_2)
