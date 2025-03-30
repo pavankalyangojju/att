@@ -3,16 +3,12 @@ import pickle
 import numpy as np
 import os
 import RPi.GPIO as GPIO
-from mfrc522 import SimpleMFRC522
 import time
 
 # Setup GPIO
 GPIO.setwarnings(False)
 if GPIO.getmode() is None:
     GPIO.setmode(GPIO.BCM)
-
-# Initialize RFID Reader
-reader = SimpleMFRC522()
 
 # Set up GPIO for LED
 LED_PIN = 18
@@ -30,31 +26,11 @@ facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalf
 
 # Data storage paths
 faces_file = 'data/faces_data.pkl'
-rfid_file = 'data/rfid_data.pkl'
 names_file = 'data/names.pkl'
 
-# Scan RFID Card
-print("Scan your RFID card...")
-
-try:
-    card_id, card_text = reader.read()
-    print(f"RFID Card ID: {card_id}")
-
-    # Check if RFID already exists
-    if os.path.exists(rfid_file):
-        with open(rfid_file, 'rb') as f:
-            stored_rfid = pickle.load(f)
-
-        if card_id in stored_rfid:
-            print("Your face is already registered, no need again.")
-            GPIO.cleanup()
-            exit()
-
-    name = input("Enter Your Name: ")
-
-except Exception as e:
-    print(f"RFID Error: {e}")
-    exit()
+# Enter code manually
+code_id = input("Enter your numeric code: ")
+name = input("Enter Your Name: ")
 
 print("Put your face towards the camera and stay until the light turns off...")
 
@@ -62,7 +38,7 @@ print("Put your face towards the camera and stay until the light turns off...")
 GPIO.output(LED_PIN, GPIO.HIGH)
 
 faces_data = []
-rfid_data = []
+codes_data = []
 names_data = []
 captured_face = None
 
@@ -88,7 +64,7 @@ while True:
 
         if len(faces_data) < 100 and time.time() - start_time < capture_duration:
             faces_data.append(resized_img)
-            rfid_data.append(card_id)
+            codes_data.append(code_id)
             names_data.append(name)
             captured_face = resized_img
 
@@ -120,16 +96,6 @@ else:
     stored_names.extend(names_data)
     with open(names_file, 'wb') as f:
         pickle.dump(stored_names, f)
-
-if not os.path.exists(rfid_file):
-    with open(rfid_file, 'wb') as f:
-        pickle.dump(rfid_data, f)
-else:
-    with open(rfid_file, 'rb') as f:
-        stored_rfid = pickle.load(f)
-    stored_rfid.extend(rfid_data)
-    with open(rfid_file, 'wb') as f:
-        pickle.dump(stored_rfid, f)
 
 if not os.path.exists(faces_file):
     with open(faces_file, 'wb') as f:
