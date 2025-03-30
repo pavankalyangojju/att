@@ -2,129 +2,191 @@ import cv2
 import pickle
 import numpy as np
 import os
-import csv
-import time
-from datetime import datetime
-import pyttsx3
 import RPi.GPIO as GPIO
-import requests
-from sklearn.neighbors import KNeighborsClassifier
+from mfrc522 import SimpleMFRC522
+import time
+from RPLCD.i2c import CharLCD
 
-# --- Telegram Config ---
-BOT_TOKEN = "8129064480:AAFZZjw7UTUrPgwUW33xu_B51MyJPg3WneY"
-CHAT_ID = "1367693706"
+# Initialize LCD
+lcd = CharLCD(i2c_expander='PCF8574', address=0x27, port=1, cols=16, rows=2, dotsize=8)
 
-# GPIO Setup
-GPIO.setmode(GPIO.BCM)
-BUZZER_PIN = 17
-LED_WRONG_PIN = 27
-LED_ATTENDANCE_PIN = 22
+# Display Welcome Message
+lcd.clear()
+lcd.write_string("HI,Welcome to")
+lcd.crlf()
+lcd.write_string("AttendanceSystem")
+time.sleep(3)
+lcd.clear()
 
-GPIO.setup(BUZZER_PIN, GPIO.OUT)
-GPIO.setup(LED_WRONG_PIN, GPIO.OUT)
-GPIO.setup(LED_ATTENDANCE_PIN, GPIO.OUT)
+# Setup GPIO
+GPIO.setwarnings(False)
+if GPIO.getmode() is None:
+    GPIO.setmode(GPIO.BCM)
 
-GPIO.output(BUZZER_PIN, GPIO.LOW)
-GPIO.output(LED_WRONG_PIN, GPIO.LOW)
-GPIO.output(LED_ATTENDANCE_PIN, GPIO.LOW)
+# Initialize RFID Reader
+reader = SimpleMFRC522()
 
-# TTS
-engine = pyttsx3.init()
+# Set up GPIO for LED
+LED_PIN = 18
+GPIO.setup(LED_PIN, GPIO.OUT)
+GPIO.output(LED_PIN, GPIO.LOW)
 
-def speak(text):
-    engine.say(text)
-    engine.runAndWait()
-
-def send_attendance_api(name, date, timestamp):
-    try:
-        requests.post("http://localhost:5000/attendance", json={"name": name, "date": date, "time": timestamp})
-    except Exception as e:
-        print("API Error:", e)
-
-def send_telegram_photo(image_path, caption=""):
-    try:
-        with open(image_path, 'rb') as photo:
-            files = {'photo': photo}
-            data = {'chat_id': CHAT_ID, 'caption': caption}
-            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto", files=files, data=data)
-    except Exception as e:
-        print("Telegram Error:", e)
-
-# Load Face Data
+# Open the camera
 video = cv2.VideoCapture(0)
 if not video.isOpened():
-    print("Error: Camera not found.")
+    lcd.write_string("Camera Error!")
+    print("Error: Could not open camera.")
     exit()
 
-faceCascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+# Load Haarcascade for face detection
+facedetect = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+# Data storage paths
+faces_file = 'data/faces_data.pkl'
+rfid_file = 'data/rfid_data.pkl'
+names_file = 'data/names.pkl'
+
+# Scan RFID Card
+lcd.write_string("Scan your CARD")
+print("Scan your RFID card...")
 
 try:
-    while True:
-        ret, img = video.read()
-        img = cv2.flip(img, -1)  # Flip vertically
+    card_id, card_text = reader.read()
+    print(f"RFID Card ID: {card_id}")
+    lcd.clear()
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = faceCascade.detectMultiScale(
-            gray,
-            scaleFactor=1.2,
-            minNeighbors=5,
-            minSize=(100, 100),
-        )
+    # Check if RFID already exists
+    if os.path.exists(rfid_file):
+        with open(rfid_file, 'rb') as f:
+            stored_rfid = pickle.load(f)
 
-        for (x, y, w, h) in faces:
-            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        if card_id in stored_rfid:
+            lcd.write_string("Face already")
+            lcd.crlf()
+            lcd.write_string("registered!")
+            print("Your face is already registered, no need again.")
+            time.sleep(3)
+            lcd.clear()
+            GPIO.cleanup()
+            exit()
 
-            # Dummy recognizer logic (replace with actual recognizer)
-            recognized_name = "Person"
-            confidence = 30  # Dummy confidence
+    lcd.write_string("Enter Your Name:")
+    name = input("Enter Your Name: ")
 
-            if confidence < 45:
-                id = recognized_name
-                conf_text = "  {0}%".format(round(100 - confidence))
-            else:
-                id = "unknown"
-                conf_text = "  {0}%".format(round(100 - confidence))
+except Exception as e:
+    lcd.clear()
+    lcd.write_string("RFID Error!")
+    print(f"RFID Error: {e}")
+    exit()
 
-            cv2.putText(img, str(id), (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            cv2.putText(img, str(conf_text), (x + 5, y + h - 5), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 1)
+# Display Face Capture Message
+lcd.clear()
+lcd.write_string("Look at Camera")
+lcd.crlf()
+lcd.write_string("Stay - light off")
+print("Put your face towards the camera and stay until the light turns off...")
 
-            date_today = datetime.now().strftime("%d-%m-%Y")
-            attendance_file = f"Attendance/Attendance_{date_today}.csv"
-            os.makedirs("Attendance/images", exist_ok=True)
+# LED ON while capturing face
+GPIO.output(LED_PIN, GPIO.HIGH)
 
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            file_exists = os.path.isfile(attendance_file)
+faces_data = []
+rfid_data = []
+names_data = []
+i = 0
+captured_face = None
 
-            with open(attendance_file, "a", newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                if not file_exists:
-                    writer.writerow(["NAME", "DATE", "TIME"])
-                writer.writerow([recognized_name, date_today, timestamp])
+# Record the start time
+start_time = time.time()
 
-            photo_filename = f"Attendance/images/{recognized_name}_{datetime.now().strftime('%H%M%S')}.jpg"
-            cv2.imwrite(photo_filename, img)
+# Set duration for face capture (30 seconds)
+capture_duration = 30  # seconds
 
-            send_telegram_photo(photo_filename, caption=f"Attendance Marked\nName: {recognized_name}\nDate: {date_today}\nTime: {timestamp}")
-            send_attendance_api(recognized_name, date_today, timestamp)
+while True:
+    ret, frame = video.read()
 
-            speak("Attendance Taken")
+    if not ret:
+        print("Error: Could not capture frame.")
+        break
 
-            GPIO.output(LED_ATTENDANCE_PIN, GPIO.HIGH)
-            GPIO.output(BUZZER_PIN, GPIO.HIGH)
-            time.sleep(1)
-            GPIO.output(BUZZER_PIN, GPIO.LOW)
-            time.sleep(10)
-            GPIO.output(LED_ATTENDANCE_PIN, GPIO.LOW)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = facedetect.detectMultiScale(gray, 1.3, 5)
 
-        cv2.imshow("Camera", img)
-        if cv2.waitKey(10) & 0xFF == 27:
-            break
+    for (x, y, w, h) in faces:
+        crop_img = frame[y:y+h, x:x+w]
+        resized_img = cv2.resize(crop_img, (50, 50))
 
-except KeyboardInterrupt:
-    print("Interrupted by user.")
+        # Capture faces every 10th frame (adjust this as needed)
+        if len(faces_data) < 100 and time.time() - start_time < capture_duration:
+            faces_data.append(resized_img)
+            rfid_data.append(card_id)
+            names_data.append(name)
+            captured_face = resized_img
 
-finally:
-    if 'video' in locals():
-        video.release()
-    cv2.destroyAllWindows()
-    GPIO.cleanup()
+        cv2.putText(frame, str(len(faces_data)), (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 255), 1)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (50, 50, 255), 1)
+
+    cv2.imshow("Frame", frame)
+    k = cv2.waitKey(1)
+
+    # Exit when 'q' is pressed or after 30 seconds
+    if k == ord('q') or time.time() - start_time >= capture_duration:
+        break
+
+video.release()
+cv2.destroyAllWindows()
+
+# LED OFF after face capture
+GPIO.output(LED_PIN, GPIO.LOW)
+
+# Display Data Saving Message
+lcd.clear()
+lcd.write_string("Saving Data...")
+print("Saving data...")
+
+# Save face data
+faces_data = np.asarray(faces_data).reshape(len(faces_data), 50, 50, 3)
+
+# Save Names
+if not os.path.exists(names_file):
+    with open(names_file, 'wb') as f:
+        pickle.dump(names_data, f)
+else:
+    with open(names_file, 'rb') as f:
+        stored_names = pickle.load(f)
+    stored_names.extend(names_data)
+    with open(names_file, 'wb') as f:
+        pickle.dump(stored_names, f)
+
+# Save RFID Data
+if not os.path.exists(rfid_file):
+    with open(rfid_file, 'wb') as f:
+        pickle.dump(rfid_data, f)
+else:
+    with open(rfid_file, 'rb') as f:
+        stored_rfid = pickle.load(f)
+    stored_rfid.extend(rfid_data)
+    with open(rfid_file, 'wb') as f:
+        pickle.dump(stored_rfid, f)
+
+# Save Faces
+if not os.path.exists(faces_file):
+    with open(faces_file, 'wb') as f:
+        pickle.dump(faces_data, f)
+else:
+    with open(faces_file, 'rb') as f:
+        stored_faces = pickle.load(f)
+        stored_faces = stored_faces.reshape(-1, 50, 50, 3)
+
+    stored_faces = np.vstack((stored_faces, faces_data))
+    with open(faces_file, 'wb') as f:
+        pickle.dump(stored_faces, f)
+
+# Final Message: Data Saved
+lcd.clear()
+lcd.write_string("Data Saved")
+lcd.crlf()
+lcd.write_string("Successfully!")
+print("Data saved successfully!")
+
+# Cleanup
+GPIO.cleanup()
